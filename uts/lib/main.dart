@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:intl/intl.dart'; // Tambahkan impor ini
 import 'dart:io';
 import 'dart:convert';
 
@@ -33,7 +34,7 @@ class _MainScreenState extends State<MainScreen> {
   final List<Widget> _pages = [
     TaskScreen(),
     ScheduleScreen(),
-    SettingsScreen(),
+    ProfileScreen(),
   ];
 
   @override
@@ -57,8 +58,8 @@ class _MainScreenState extends State<MainScreen> {
             label: 'Jadwal',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.settings),
-            label: 'Pengaturan',
+            icon: Icon(Icons.person),
+            label: 'Profil',
           ),
         ],
       ),
@@ -244,6 +245,10 @@ class _TaskScreenState extends State<TaskScreen> {
               itemCount: _tasks.length,
               itemBuilder: (context, index) {
                 final task = _tasks[index];
+                final deadline = DateTime.parse(task['deadline']);
+                final formattedDate = DateFormat('yyyy-MM-dd').format(deadline);
+                final formattedTime = DateFormat('HH:mm').format(deadline);
+
                 return Card(
                   margin: EdgeInsets.symmetric(vertical: 8, horizontal: 16),
                   child: ListTile(
@@ -265,7 +270,7 @@ class _TaskScreenState extends State<TaskScreen> {
                       ),
                     ),
                     subtitle: Text(
-                      '${task['details']}\nDeadline: ${task['deadline']}',
+                      '${task['details']}\nDeadline: $formattedDate\nTime: $formattedTime',
                     ),
                     isThreeLine: true,
                     trailing: Row(
@@ -313,18 +318,34 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   }
 
   Future<void> _loadSchedules() async {
-    final prefs = await SharedPreferences.getInstance();
-    final schedulesData = prefs.getStringList('schedules') ?? [];
-    setState(() {
-      _schedules.addAll(schedulesData.map((schedule) => Map<String, dynamic>.from(scheduleDecode(schedule))));
-    });
-  }
+  final prefs = await SharedPreferences.getInstance();
+  final schedulesData = prefs.getStringList('schedules') ?? [];
+
+  setState(() {
+    _schedules.clear();
+    _schedules.addAll(
+      schedulesData.map((scheduleStr) {
+        final decoded = jsonDecode(scheduleStr) as Map<String, dynamic>;
+
+        // Pastikan 'subjects' dikonversi ke List<Map<String, String>>
+        final subjects = (decoded['subjects'] as List)
+            .map((item) => Map<String, String>.from(item))
+            .toList();
+
+        return {
+          'day': decoded['day'],
+          'subjects': subjects,
+        };
+      }).toList(),
+    );
+  });
+}
 
   Future<void> _saveSchedules() async {
-    final prefs = await SharedPreferences.getInstance();
-    final schedulesData = _schedules.map((schedule) => scheduleEncode(schedule)).toList();
-    await prefs.setStringList('schedules', schedulesData);
-  }
+  final prefs = await SharedPreferences.getInstance();
+  final schedulesData = _schedules.map((schedule) => jsonEncode(schedule)).toList();
+  await prefs.setStringList('schedules', schedulesData);
+}
 
   String scheduleEncode(Map<String, dynamic> schedule) => jsonEncode(schedule);
 
@@ -338,6 +359,161 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       });
     });
     _saveSchedules();
+  }
+
+  void _editSchedule(int index, String day, List<Map<String, String>> subjects) {
+    setState(() {
+      _schedules[index] = {
+        'day': day,
+        'subjects': subjects,
+      };
+    });
+    _saveSchedules();
+  }
+
+  void _deleteSchedule(int index) {
+    setState(() {
+      _schedules.removeAt(index);
+    });
+    _saveSchedules();
+  }
+
+  void _showAddOrEditScheduleDialog({int? index}) {
+    final _subjectController = TextEditingController();
+    TimeOfDay? _startTime;
+    TimeOfDay? _endTime;
+    List<Map<String, String>> _subjects = [];
+    String? _selectedDay;
+
+    if (index != null) {
+      _selectedDay = _schedules[index]['day'];
+      _subjects = List<Map<String, String>>.from(_schedules[index]['subjects']);
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: Text(index == null ? 'Tambah Jadwal' : 'Edit Jadwal'),
+              content: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    DropdownButtonFormField<String>(
+                      value: _selectedDay,
+                      items: _days.map((day) {
+                        return DropdownMenuItem(
+                          value: day,
+                          child: Text(day),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedDay = value;
+                        });
+                      },
+                      decoration: InputDecoration(labelText: 'Hari'),
+                    ),
+                    TextField(
+                      controller: _subjectController,
+                      decoration: InputDecoration(labelText: 'Mata Kuliah'),
+                    ),
+                    SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8.0,
+                      runSpacing: 4.0,
+                      children: [
+                        ElevatedButton(
+                          onPressed: () async {
+                            final pickedTime = await showTimePicker(
+                              context: context,
+                              initialTime: TimeOfDay.now(),
+                            );
+                            if (pickedTime != null) {
+                              setState(() {
+                                _startTime = pickedTime;
+                              });
+                            }
+                          },
+                          child: Text(_startTime == null
+                              ? 'Pilih Jam Mulai'
+                              : 'Mulai: ${_startTime!.format(context)}'),
+                        ),
+                        ElevatedButton(
+                          onPressed: () async {
+                            final pickedTime = await showTimePicker(
+                              context: context,
+                              initialTime: TimeOfDay.now(),
+                            );
+                            if (pickedTime != null) {
+                              setState(() {
+                                _endTime = pickedTime;
+                              });
+                            }
+                          },
+                          child: Text(_endTime == null
+                              ? 'Pilih Jam Selesai'
+                              : 'Selesai: ${_endTime!.format(context)}'),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 10),
+                    ElevatedButton(
+                      onPressed: () {
+                        if (_subjectController.text.isNotEmpty &&
+                            _startTime != null &&
+                            _endTime != null) {
+                          setState(() {
+                            _subjects.add({
+                              'subject': _subjectController.text,
+                              'time':
+                                  '${_startTime!.format(context)} - ${_endTime!.format(context)}',
+                            });
+                            _subjectController.clear();
+                            _startTime = null;
+                            _endTime = null;
+                          });
+                        }
+                      },
+                      child: Text('Tambah Mata Kuliah'),
+                    ),
+                    SizedBox(height: 10),
+                    ..._subjects.map((subject) {
+                      return ListTile(
+                        title: Text(subject['subject']!),
+                        subtitle: Text(subject['time']!),
+                      );
+                    }).toList(),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                  child: Text('Batal'),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    if (_selectedDay != null && _subjects.isNotEmpty) {
+                      if (index == null) {
+                        _addSchedule(_selectedDay!, _subjects);
+                      } else {
+                        _editSchedule(index, _selectedDay!, _subjects);
+                      }
+                      Navigator.of(context).pop();
+                    }
+                  },
+                  child: Text('Simpan'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   final List<String> _days = [
@@ -387,8 +563,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       decoration: InputDecoration(labelText: 'Mata Kuliah'),
                     ),
                     SizedBox(height: 10),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    Wrap(
+                      spacing: 8.0, // Jarak horizontal antar elemen
+                      runSpacing: 4.0, // Jarak vertikal antar elemen
                       children: [
                         ElevatedButton(
                           onPressed: () async {
@@ -504,13 +681,31 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       schedule['day'],
                       style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                     ),
-                    children: (schedule['subjects'] as List<Map<String, String>>)
-                        .map((subject) {
-                      return ListTile(
-                        title: Text(subject['subject']!),
-                        subtitle: Text(subject['time']!),
-                      );
-                    }).toList(),
+                    children: [
+                      ...schedule['subjects'].map((subject) {
+                        return ListTile(
+                          title: Text(subject['subject']!),
+                          subtitle: Text(subject['time']!),
+                        );
+                      }).toList(),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          IconButton(
+                            icon: Icon(Icons.edit, color: Colors.blue),
+                            onPressed: () {
+                              _showAddOrEditScheduleDialog(index: index);
+                            },
+                          ),
+                          IconButton(
+                            icon: Icon(Icons.delete, color: Colors.red),
+                            onPressed: () {
+                              _deleteSchedule(index);
+                            },
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 );
               },
@@ -524,16 +719,16 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   }
 }
 
-class SettingsScreen extends StatefulWidget {
+class ProfileScreen extends StatefulWidget {
   @override
-  _SettingsScreenState createState() => _SettingsScreenState();
+  _ProfileScreenState createState() => _ProfileScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
+class _ProfileScreenState extends State<ProfileScreen> {
   String _username = "Aura Zahra";
   String _educationLevel = "Mahasiswa";
-  String _major = "Teknik Informatika";
-  File? _profileImage;
+  String _major = "Sistem Informasi";
+  String _profileImageUrl = "https://via.placeholder.com/150"; // Default URL
 
   @override
   void initState() {
@@ -546,22 +741,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       _username = prefs.getString('username') ?? "Aura Zahra";
       _educationLevel = prefs.getString('educationLevel') ?? "Mahasiswa";
-      _major = prefs.getString('major') ?? "Teknik Informatika";
+      _major = prefs.getString('major') ?? "Sistem Informasi";
+      _profileImageUrl = prefs.getString('profileImageUrl') ??
+          "https://via.placeholder.com/150"; // Default URL
     });
   }
 
   Future<void> _savePreference(String key, String value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(key, value);
-  }
-
-  void _pickImage() async {
-    final pickedFile = await ImagePicker().pickImage(source: ImageSource.gallery);
-    if (pickedFile != null) {
-      setState(() {
-        _profileImage = File(pickedFile.path);
-      });
-    }
   }
 
   void _showEditDialog(String title, String initialValue, Function(String) onSave) {
@@ -632,11 +820,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  void _showEditProfileImageDialog() {
+    _showEditDialog('Link Foto Profil', _profileImageUrl, (value) {
+      setState(() {
+        _profileImageUrl = value;
+      });
+      _savePreference('profileImageUrl', value);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Pengaturan'),
+        title: Text('Profil'),
         centerTitle: true,
         backgroundColor: Colors.blue,
       ),
@@ -645,15 +842,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Column(
           children: [
             GestureDetector(
-              onTap: _pickImage,
+              onTap: _showEditProfileImageDialog,
               child: CircleAvatar(
                 radius: 50,
-                backgroundImage: _profileImage != null
-                    ? FileImage(_profileImage!)
-                    : AssetImage('assets/default_profile.png') as ImageProvider,
-                child: _profileImage == null
-                    ? Icon(Icons.camera_alt, size: 30, color: Colors.white)
-                    : null,
+                backgroundImage: NetworkImage(_profileImageUrl),
+                child: Icon(Icons.edit, size: 30, color: Colors.white),
               ),
             ),
             SizedBox(height: 16),
